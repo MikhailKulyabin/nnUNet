@@ -57,8 +57,46 @@ def preprocess_fromfiles_save_to_queue(list_of_lists: List[List[str]],
         abort_event.set()
         raise e
 
-
 def preprocessing_iterator_fromfiles(list_of_lists: List[List[str]],
+                                        list_of_segs_from_prev_stage_files: Union[None, List[str]],
+                                        output_filenames_truncated: Union[None, List[str]],
+                                        plans_manager: PlansManager,
+                                        dataset_json: dict,
+                                        configuration_manager: ConfigurationManager,
+                                        num_processes: int,
+                                        pin_memory: bool = False,
+                                        verbose: bool = False):
+    # single process iterator version
+    print('SINGE ITERATOR')
+    num_processes = 1
+    assert num_processes >= 1
+
+    for i in range(len(list_of_lists)):
+        data, seg, data_properties = configuration_manager.preprocessor_class(verbose=verbose).run_case(
+            list_of_lists[i],
+            list_of_segs_from_prev_stage_files[i] if list_of_segs_from_prev_stage_files is not None else None,
+            plans_manager,
+            configuration_manager,
+            dataset_json)
+        if list_of_segs_from_prev_stage_files is not None and list_of_segs_from_prev_stage_files[i] is not None:
+            seg_onehot = convert_labelmap_to_one_hot(seg[0], plans_manager.get_label_manager(dataset_json).foreground_labels,
+                                                     data.dtype)
+            data = np.vstack((data, seg_onehot))
+
+        data = torch.from_numpy(data).to(dtype=torch.float32, memory_format=torch.contiguous_format)
+
+        item = {'data': data, 'data_properties': data_properties,
+                'ofile': output_filenames_truncated[i] if output_filenames_truncated is not None else None}
+        if pin_memory:
+            [i.pin_memory() for i in item.values() if isinstance(i, torch.Tensor)]
+        yield item
+        
+
+
+
+
+
+def multi_preprocessing_iterator_fromfiles(list_of_lists: List[List[str]],
                                      list_of_segs_from_prev_stage_files: Union[None, List[str]],
                                      output_filenames_truncated: Union[None, List[str]],
                                      plans_manager: PlansManager,

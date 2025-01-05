@@ -345,78 +345,105 @@ class nnUNetPredictor(object):
         each element returned by data_iterator must be a dict with 'data', 'ofile' and 'data_properties' keys!
         If 'ofile' is None, the result will be returned instead of written to a file
         """
-        with multiprocessing.get_context("spawn").Pool(num_processes_segmentation_export) as export_pool:
-            worker_list = [i for i in export_pool._pool]
-            r = []
-            for preprocessed in data_iterator:
-                data = preprocessed['data']
-                if isinstance(data, str):
-                    delfile = data
-                    data = torch.from_numpy(np.load(data))
-                    os.remove(delfile)
+        # single process
+        print('PREDICTING SINGLE PROCESS')
+        results = []
+        for preprocessed in data_iterator:
+            print(preprocessed)
+            data = preprocessed['data']
+            if isinstance(data, str):
+                delfile = data
+                data = torch.from_numpy(np.load(data))
+                os.remove(delfile)
 
-                ofile = preprocessed['ofile']
-                if ofile is not None:
-                    print(f'\nPredicting {os.path.basename(ofile)}:')
-                else:
-                    print(f'\nPredicting image of shape {data.shape}:')
+            ofile = preprocessed['ofile']
+            properties = preprocessed['data_properties']
 
-                print(f'perform_everything_on_device: {self.perform_everything_on_device}')
+            prediction = self.predict_logits_from_preprocessed_data(data).cpu()
+            hmap = convert_predicted_logits_to_segmentation_with_correct_shape(prediction, self.plans_manager,
+                                                                        self.configuration_manager, self.label_manager,
+                                                                        properties, save_probabilities)
 
-                properties = preprocessed['data_properties']
+            print(f'\nDone with image of shape {data.shape}:')
+            results.append(hmap)
+        return results
+        
+        
 
-                # let's not get into a runaway situation where the GPU predicts so fast that the disk has to b swamped with
-                # npy files
-                proceed = not check_workers_alive_and_busy(export_pool, worker_list, r, allowed_num_queued=2)
-                while not proceed:
-                    sleep(0.1)
-                    proceed = not check_workers_alive_and_busy(export_pool, worker_list, r, allowed_num_queued=2)
 
-                prediction = self.predict_logits_from_preprocessed_data(data).cpu()
 
-                if ofile is not None:
-                    # this needs to go into background processes
-                    # export_prediction_from_logits(prediction, properties, self.configuration_manager, self.plans_manager,
-                    #                               self.dataset_json, ofile, save_probabilities)
-                    print('sending off prediction to background worker for resampling and export')
-                    r.append(
-                        export_pool.starmap_async(
-                            export_prediction_from_logits,
-                            ((prediction, properties, self.configuration_manager, self.plans_manager,
-                              self.dataset_json, ofile, save_probabilities),)
-                        )
-                    )
-                else:
-                    # convert_predicted_logits_to_segmentation_with_correct_shape(
-                    #             prediction, self.plans_manager,
-                    #              self.configuration_manager, self.label_manager,
-                    #              properties,
-                    #              save_probabilities)
+        # with multiprocessing.get_context("spawn").Pool(num_processes_segmentation_export) as export_pool:
+        #     worker_list = [i for i in export_pool._pool]
+        #     r = []
+        #     for preprocessed in data_iterator:
+        #         data = preprocessed['data']
+        #         if isinstance(data, str):
+        #             delfile = data
+        #             data = torch.from_numpy(np.load(data))
+        #             os.remove(delfile)
 
-                    print('sending off prediction to background worker for resampling')
-                    r.append(
-                        export_pool.starmap_async(
-                            convert_predicted_logits_to_segmentation_with_correct_shape, (
-                                (prediction, self.plans_manager,
-                                 self.configuration_manager, self.label_manager,
-                                 properties,
-                                 save_probabilities),)
-                        )
-                    )
-                if ofile is not None:
-                    print(f'done with {os.path.basename(ofile)}')
-                else:
-                    print(f'\nDone with image of shape {data.shape}:')
-            ret = [i.get()[0] for i in r]
+        #         ofile = preprocessed['ofile']
+        #         if ofile is not None:
+        #             print(f'\nPredicting {os.path.basename(ofile)}:')
+        #         else:
+        #             print(f'\nPredicting image of shape {data.shape}:')
 
-        if isinstance(data_iterator, MultiThreadedAugmenter):
-            data_iterator._finish()
+        #         print(f'perform_everything_on_device: {self.perform_everything_on_device}')
 
-        # clear lru cache
-        compute_gaussian.cache_clear()
-        # clear device cache
-        empty_cache(self.device)
-        return ret
+        #         properties = preprocessed['data_properties']
+
+        #         # let's not get into a runaway situation where the GPU predicts so fast that the disk has to b swamped with
+        #         # npy files
+        #         proceed = not check_workers_alive_and_busy(export_pool, worker_list, r, allowed_num_queued=2)
+        #         while not proceed:
+        #             sleep(0.1)
+        #             proceed = not check_workers_alive_and_busy(export_pool, worker_list, r, allowed_num_queued=2)
+
+        #         prediction = self.predict_logits_from_preprocessed_data(data).cpu()
+
+        #         if ofile is not None:
+        #             # this needs to go into background processes
+        #             # export_prediction_from_logits(prediction, properties, self.configuration_manager, self.plans_manager,
+        #             #                               self.dataset_json, ofile, save_probabilities)
+        #             print('sending off prediction to background worker for resampling and export')
+        #             r.append(
+        #                 export_pool.starmap_async(
+        #                     export_prediction_from_logits,
+        #                     ((prediction, properties, self.configuration_manager, self.plans_manager,
+        #                       self.dataset_json, ofile, save_probabilities),)
+        #                 )
+        #             )
+        #         else:
+        #             # convert_predicted_logits_to_segmentation_with_correct_shape(
+        #             #             prediction, self.plans_manager,
+        #             #              self.configuration_manager, self.label_manager,
+        #             #              properties,
+        #             #              save_probabilities)
+
+        #             print('sending off prediction to background worker for resampling')
+        #             r.append(
+        #                 export_pool.starmap_async(
+        #                     convert_predicted_logits_to_segmentation_with_correct_shape, (
+        #                         (prediction, self.plans_manager,
+        #                          self.configuration_manager, self.label_manager,
+        #                          properties,
+        #                          save_probabilities),)
+        #                 )
+        #             )
+        #         if ofile is not None:
+        #             print(f'done with {os.path.basename(ofile)}')
+        #         else:
+        #             print(f'\nDone with image of shape {data.shape}:')
+        #     ret = [i.get()[0] for i in r]
+
+        # if isinstance(data_iterator, MultiThreadedAugmenter):
+        #     data_iterator._finish()
+
+        # # clear lru cache
+        # compute_gaussian.cache_clear()
+        # # clear device cache
+        # empty_cache(self.device)
+        # return ret
 
     def predict_single_npy_array(self, input_image: np.ndarray, image_properties: dict,
                                  segmentation_previous_stage: np.ndarray = None,
@@ -658,92 +685,6 @@ class nnUNetPredictor(object):
                 predicted_logits = predicted_logits[(slice(None), *slicer_revert_padding[1:])]
         return predicted_logits
 
-    def predict_from_files_sequential(self,
-                           list_of_lists_or_source_folder: Union[str, List[List[str]]],
-                           output_folder_or_list_of_truncated_output_files: Union[str, None, List[str]],
-                           save_probabilities: bool = False,
-                           overwrite: bool = True,
-                           folder_with_segs_from_prev_stage: str = None):
-        """
-        Just like predict_from_files but doesn't use any multiprocessing. Slow, but sometimes necessary
-        """
-        if isinstance(output_folder_or_list_of_truncated_output_files, str):
-            output_folder = output_folder_or_list_of_truncated_output_files
-        elif isinstance(output_folder_or_list_of_truncated_output_files, list):
-            output_folder = os.path.dirname(output_folder_or_list_of_truncated_output_files[0])
-        else:
-            output_folder = None
-
-        ########################
-        # let's store the input arguments so that its clear what was used to generate the prediction
-        if output_folder is not None:
-            my_init_kwargs = {}
-            for k in inspect.signature(self.predict_from_files_sequential).parameters.keys():
-                my_init_kwargs[k] = locals()[k]
-            my_init_kwargs = deepcopy(
-                my_init_kwargs)  # let's not unintentionally change anything in-place. Take this as a
-            recursive_fix_for_json_export(my_init_kwargs)
-            maybe_mkdir_p(output_folder)
-            save_json(my_init_kwargs, join(output_folder, 'predict_from_raw_data_args.json'))
-
-            # we need these two if we want to do things with the predictions like for example apply postprocessing
-            save_json(self.dataset_json, join(output_folder, 'dataset.json'), sort_keys=False)
-            save_json(self.plans_manager.plans, join(output_folder, 'plans.json'), sort_keys=False)
-        #######################
-
-        # check if we need a prediction from the previous stage
-        if self.configuration_manager.previous_stage_name is not None:
-            assert folder_with_segs_from_prev_stage is not None, \
-                f'The requested configuration is a cascaded network. It requires the segmentations of the previous ' \
-                f'stage ({self.configuration_manager.previous_stage_name}) as input. Please provide the folder where' \
-                f' they are located via folder_with_segs_from_prev_stage'
-
-        # sort out input and output filenames
-        list_of_lists_or_source_folder, output_filename_truncated, seg_from_prev_stage_files = \
-            self._manage_input_and_output_lists(list_of_lists_or_source_folder,
-                                                output_folder_or_list_of_truncated_output_files,
-                                                folder_with_segs_from_prev_stage, overwrite, 0, 1,
-                                                save_probabilities)
-        if len(list_of_lists_or_source_folder) == 0:
-            return
-
-        label_manager = self.plans_manager.get_label_manager(self.dataset_json)
-        preprocessor = self.configuration_manager.preprocessor_class(verbose=self.verbose)
-
-        if output_filename_truncated is None:
-            output_filename_truncated = [None] * len(list_of_lists_or_source_folder)
-        if seg_from_prev_stage_files is None:
-            seg_from_prev_stage_files = [None] * len(seg_from_prev_stage_files)
-
-        ret = []
-        for li, of, sps in zip(list_of_lists_or_source_folder, output_filename_truncated, seg_from_prev_stage_files):
-            data, seg, data_properties = preprocessor.run_case(
-                li,
-                sps,
-                self.plans_manager,
-                self.configuration_manager,
-                self.dataset_json
-            )
-
-            print(f'perform_everything_on_device: {self.perform_everything_on_device}')
-
-            prediction = self.predict_logits_from_preprocessed_data(torch.from_numpy(data)).cpu()
-
-            if of is not None:
-                export_prediction_from_logits(prediction, data_properties, self.configuration_manager, self.plans_manager,
-                  self.dataset_json, of, save_probabilities)
-            else:
-                ret.append(convert_predicted_logits_to_segmentation_with_correct_shape(prediction, self.plans_manager,
-                     self.configuration_manager, self.label_manager,
-                     data_properties,
-                     save_probabilities))
-
-        # clear lru cache
-        compute_gaussian.cache_clear()
-        # clear device cache
-        empty_cache(self.device)
-        return ret
-
 
 def predict_entry_point_modelfolder():
     import argparse
@@ -977,7 +918,7 @@ def predict_entry_point():
 
 
 if __name__ == '__main__':
-    ########################## predict a bunch of files
+    # predict a bunch of files
     from nnunetv2.paths import nnUNet_results, nnUNet_raw
 
     predictor = nnUNetPredictor(
@@ -991,28 +932,42 @@ if __name__ == '__main__':
         allow_tqdm=True
     )
     predictor.initialize_from_trained_model_folder(
-        join(nnUNet_results, 'Dataset004_Hippocampus/nnUNetTrainer_5epochs__nnUNetPlans__3d_fullres'),
+        join(nnUNet_results, 'Dataset003_Liver/nnUNetTrainer__nnUNetPlans__3d_lowres'),
         use_folds=(0,),
         checkpoint_name='checkpoint_final.pth',
     )
+    predictor.predict_from_files(join(nnUNet_raw, 'Dataset003_Liver/imagesTs'),
+                                 join(nnUNet_raw, 'Dataset003_Liver/imagesTs_predlowres'),
+                                 save_probabilities=False, overwrite=False,
+                                 num_processes_preprocessing=2, num_processes_segmentation_export=2,
+                                 folder_with_segs_from_prev_stage=None, num_parts=1, part_id=0)
+
+    # predict a numpy array
+    from nnunetv2.imageio.simpleitk_reader_writer import SimpleITKIO
+
+    img, props = SimpleITKIO().read_images([join(nnUNet_raw, 'Dataset003_Liver/imagesTr/liver_63_0000.nii.gz')])
+    ret = predictor.predict_single_npy_array(img, props, None, None, False)
+
+    iterator = predictor.get_data_iterator_from_raw_npy_data([img], None, [props], None, 1)
+    ret = predictor.predict_from_data_iterator(iterator, False, 1)
+
+    # predictor = nnUNetPredictor(
+    #     tile_step_size=0.5,
+    #     use_gaussian=True,
+    #     use_mirroring=True,
+    #     perform_everything_on_device=True,
+    #     device=torch.device('cuda', 0),
+    #     verbose=False,
+    #     allow_tqdm=True
+    #     )
+    # predictor.initialize_from_trained_model_folder(
+    #     join(nnUNet_results, 'Dataset003_Liver/nnUNetTrainer__nnUNetPlans__3d_cascade_fullres'),
+    #     use_folds=(0,),
+    #     checkpoint_name='checkpoint_final.pth',
+    # )
     # predictor.predict_from_files(join(nnUNet_raw, 'Dataset003_Liver/imagesTs'),
-    #                              join(nnUNet_raw, 'Dataset003_Liver/imagesTs_predlowres'),
+    #                              join(nnUNet_raw, 'Dataset003_Liver/imagesTs_predCascade'),
     #                              save_probabilities=False, overwrite=False,
     #                              num_processes_preprocessing=2, num_processes_segmentation_export=2,
-    #                              folder_with_segs_from_prev_stage=None, num_parts=1, part_id=0)
-    #
-    # # predict a numpy array
-    # from nnunetv2.imageio.simpleitk_reader_writer import SimpleITKIO
-    #
-    # img, props = SimpleITKIO().read_images([join(nnUNet_raw, 'Dataset003_Liver/imagesTr/liver_63_0000.nii.gz')])
-    # ret = predictor.predict_single_npy_array(img, props, None, None, False)
-    #
-    # iterator = predictor.get_data_iterator_from_raw_npy_data([img], None, [props], None, 1)
-    # ret = predictor.predict_from_data_iterator(iterator, False, 1)
-
-    ret = predictor.predict_from_files_sequential(
-        [['/media/isensee/raw_data/nnUNet_raw/Dataset004_Hippocampus/imagesTs/hippocampus_002_0000.nii.gz'], ['/media/isensee/raw_data/nnUNet_raw/Dataset004_Hippocampus/imagesTs/hippocampus_005_0000.nii.gz']],
-        '/home/isensee/temp/tmp', False, True, None
-    )
-
-
+    #                              folder_with_segs_from_prev_stage='/media/isensee/data/nnUNet_raw/Dataset003_Liver/imagesTs_predlowres',
+    #                              num_parts=1, part_id=0)
