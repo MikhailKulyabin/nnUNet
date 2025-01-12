@@ -19,7 +19,7 @@ from nnunetv2.utilities.label_handling.label_handling import get_labelmanager_cl
 
 # see https://adamj.eu/tech/2021/05/13/python-type-hints-how-to-fix-circular-imports/
 from typing import TYPE_CHECKING
-from dynamic_network_architectures.building_blocks.helper import convert_dim_to_conv_op, get_matching_instancenorm
+# from dynamic_network_architectures.building_blocks.helper import convert_dim_to_conv_op, get_matching_instancenorm
 
 if TYPE_CHECKING:
     from nnunetv2.utilities.label_handling.label_handling import LabelManager

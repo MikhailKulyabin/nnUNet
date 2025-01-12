@@ -15,10 +15,10 @@
 import warnings
 from typing import Tuple, Union, List
 import numpy as np
-from nibabel import io_orientation
+# from nibabel import io_orientation
 
 from nnunetv2.imageio.base_reader_writer import BaseReaderWriter
-import nibabel
+# import nibabel
 
 
 class NibabelIO(BaseReaderWriter):
