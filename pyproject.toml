@@ -52,8 +52,8 @@ dependencies = [
     # "yacs",
     "batchgeneratorsv2>=0.2",
     # "einops",
-    "torch>=2.1.0,<2.3.0",
-    "torchvision>=0.16.0,<0.18.0",
+    "torch @ https://download.pytorch.org/whl/cu118/torch-2.1.2%2Bcu118-cp310-cp310-linux_x86_64.whl",
+    "torchvision",
 ]
 
 [project.urls]
